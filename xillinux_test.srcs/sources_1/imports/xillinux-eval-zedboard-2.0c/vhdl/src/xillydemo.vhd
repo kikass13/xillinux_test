@@ -191,6 +191,21 @@ architecture sample_arch of xillydemo is
       user_w_smb_data : IN std_logic_vector(7 DOWNTO 0);
       user_w_smb_open : IN std_logic);
   end component;
+  
+  
+  COMPONENT xillybus_wrapper_0
+    PORT (
+      ap_clk : IN STD_LOGIC;
+      ap_rst : IN STD_LOGIC;
+      in_r_dout : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+      in_r_empty_n : IN STD_LOGIC;
+      in_r_read : OUT STD_LOGIC;
+      out_r_din : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
+      out_r_full_n : IN STD_LOGIC;
+      out_r_write : OUT STD_LOGIC
+    );
+  END COMPONENT;
+  
 
 -- Synplicity black box declaration
   attribute syn_black_box : boolean;
@@ -298,6 +313,31 @@ architecture sample_arch of xillydemo is
   signal DDR_VRP : std_logic;
   signal MIO : std_logic_vector(53 DOWNTO 0);
   signal DDR_WEB : std_logic;
+  
+  
+    -- Wires related to HLS_wrapper
+    signal in_r_dout :  std_logic_vector(31 DOWNTO 0);
+    signal in_r_read :  std_logic;
+
+    signal hls_fifo_rd_en :  std_logic;
+    signal hls_fifo_empty :  std_logic;
+    
+    signal in_r_empty_n :  std_logic;
+    signal out_r_din :  std_logic_vector(31 DOWNTO 0);
+    signal out_r_full :  std_logic;
+    signal out_r_write :  std_logic;
+    signal debug_out_din :  std_logic_vector(7 DOWNTO 0);
+    signal debug_out_full :  std_logic;
+    signal debug_out_write :  std_logic;
+    
+    signal ap_rst : std_logic;
+
+
+function invert (input : std_logic) return std_logic is
+begin
+  return not input;
+end function;
+
   
 begin
   xillybus_ins : xillybus
@@ -473,23 +513,80 @@ begin
   user_r_mem_8_eof <= '0';
   user_w_mem_8_full <= '0';
 
---  32-bit loopback
 
-  fifo_32 : fifo_32x512
+-----------------------------------------------------------------
+-----------------------------------------------------------------
+-----------------------------------------------------------------
+
+-- write (input) data channel from xillybus to fifo to logic 
+fifo_to_function : fifo_32x512 
     port map(
-      clk        => bus_clk,
-      srst       => reset_32,
-      din        => user_w_write_32_data,
-      wr_en      => user_w_write_32_wren,
-      rd_en      => user_r_read_32_rden,
-      dout       => user_r_read_32_data,
-      full       => user_w_write_32_full,
-      empty      => user_r_read_32_empty
-      );
+      clk     =>  bus_clk,
+      srst    =>  invert(user_w_write_32_open),
+      din     =>  user_w_write_32_data,
+      wr_en   =>  user_w_write_32_wren,
+      rd_en   =>  hls_fifo_rd_en,
+      dout    =>  in_r_dout,
+      full    =>  user_w_write_32_full,
+      empty   =>  hls_fifo_empty
+    );
 
-  reset_32 <= not (user_w_write_32_open or user_r_read_32_open);
+  hls_fifo_rd_en <= not hls_fifo_empty and (in_r_read or not in_r_empty_n);
 
-  user_r_read_32_eof <= '0';
+
+r_empty: process (bus_clk)
+  begin
+    if rising_edge(bus_clk) then
+       in_r_empty_n <= in_r_empty_n;
+       if ( user_w_write_32_open = '0') then
+          in_r_empty_n <= '0';
+       elsif (hls_fifo_rd_en = '1') then
+          in_r_empty_n <= '1';
+       elsif (in_r_read = '1') then
+          in_r_empty_n <= '0';
+       end if;
+    end if;
+end process;
+
+
+-- read (output) data channel from logic to fifo to xillybus 
+  function_to_fifo : fifo_32x512 
+    port map(
+      clk     =>  bus_clk,
+      srst    =>  invert(user_r_read_32_open),
+      din     =>  out_r_din,
+      wr_en   =>  out_r_write,
+      rd_en   =>  user_r_read_32_rden,
+      dout    =>  user_r_read_32_data,
+      full    =>  out_r_full,
+      empty   =>  user_r_read_32_empty
+    );
+
+   user_r_read_32_eof <= '0';
+
+
+
+  HLS_wrapper : xillybus_wrapper_0
+    port map(
+      ap_clk => bus_clk,
+      ap_rst => ap_rst,
+      
+      in_r_dout => in_r_dout,
+      in_r_empty_n => in_r_empty_n,
+      in_r_read => in_r_read,
+      out_r_din => out_r_din,
+      out_r_full_n => invert(out_r_full),
+      out_r_write => out_r_write
+    );
+    
+    ap_rst <= not user_w_write_32_open or not user_r_read_32_open;
+
+
+-----------------------------------------------------------------
+-----------------------------------------------------------------
+-----------------------------------------------------------------
+
+
   
 --  8-bit loopback
 
