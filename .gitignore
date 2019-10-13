@@ -1,0 +1,22 @@
+
+# Ignore all
+*
+
+# Unignore all dirs
+!*/
+
+# Unignore git
+!.gitignore
+
+# ignore all special inernal dirs
+*.runs/*
+*.hw/*
+*.cache/*
+*.ip_user_files/*
+
+# Unignore all relevant files
+!*.xpr
+!*.tcl
+
+!*.vhd
+!*.v
